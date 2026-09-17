@@ -1,0 +1,35 @@
+{
+  "name": "forecast-fork",
+  "version": "0.1.0",
+  "description": "MCP server that recommends what to eat based on live location + weather, reasoning about cultural/culinary context via Bedrock (built for the Alexa+ track).",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx scripts/smoke-test.ts",
+    "smoke:weather": "tsx scripts/smoke-test-weather.ts",
+    "smoke:restaurants": "tsx scripts/smoke-test-restaurants.ts",
+    "demo:weather-impact": "tsx scripts/demo-weather-impact.ts",
+    "inspect": "npx @modelcontextprotocol/inspector tsx src/index.ts",
+    "http": "tsx watch src/http.ts",
+    "load-test": "tsx scripts/load-test.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.687.0",
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forecast-fork — Alexa+ simulated demo</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --bg-panel: #10161f;
+    --text: #eef2f8;
+    --text-dim: #8b97ab;
+    --accent: #29d7e8;
+    --accent-2: #6b5bff;
+    --accent-warm: #ffb454;
+    --border: #1f2836;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 32px 16px 48px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-dim);
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    margin-bottom: 28px;
+  }
+  .brand b { color: var(--text); font-weight: 600; }
+  .brand .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+  .orb-wrap {
+    position: relative;
+    width: 180px;
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+  .orb {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--accent), var(--accent-2) 70%);
+    box-shadow: 0 0 40px 6px rgba(41, 215, 232, 0.35);
+    transition: box-shadow 0.3s ease, transform 0.3s ease;
+  }
+  .orb-wrap .ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1.5px solid rgba(41, 215, 232, 0.25);
+    opacity: 0;
+  }
+  /* idle: gentle breathing */
+  body[data-state="idle"] .orb { animation: breathe 3.2s ease-in-out infinite; }
+  /* listening: brighter, quicker pulse */
+  body[data-state="listening"] .orb {
+    animation: breathe 1s ease-in-out infinite;
+    box-shadow: 0 0 60px 14px rgba(41, 215, 232, 0.55);
+  }
+  body[data-state="listening"] .ring { animation: ripple 1.4s ease-out infinite; opacity: 1; }
+  /* thinking: rotating gradient, faster pulse */
+  body[data-state="thinking"] .orb {
+    animation: spin 1.6s linear infinite, breathe 0.8s ease-in-out infinite;
+    background: conic-gradient(from 0deg, var(--accent), var(--accent-2), var(--accent-warm), var(--accent));
+  }
+  /* speaking: warm pulse synced loosely with speech */
+  body[data-state="speaking"] .orb {
+    animation: breathe 0.6s ease-in-out infinite;
+    background: radial-gradient(circle at 35% 30%, var(--accent-warm), var(--accent-2) 70%);
+    box-shadow: 0 0 60px 14px rgba(255, 180, 84, 0.45);
+  }
+
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+  }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes ripple {
+    0% { transform: scale(0.9); opacity: 0.8; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+
+  .state-label {
+    font-size: 14px;
+    color: var(--text-dim);
+    min-height: 20px;
+    margin-bottom: 24px;
+    letter-spacing: 0.02em;
+  }
+
+  .input-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 560px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 8px 8px 8px 20px;
+  }
+  .input-row input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 15px;
+    padding: 8px 0;
+  }
+  .input-row input::placeholder { color: var(--text-dim); }
+  .icon-btn {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: none;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .mic-btn { background: var(--border); color: var(--text); }
+  .mic-btn.active { background: var(--accent); color: #04121a; }
+  .send-btn { background: var(--accent); color: #04121a; }
+  .icon-btn:hover { filter: brightness(1.1); }
+  .icon-btn svg { width: 18px; height: 18px; }
+
+  .examples {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    max-width: 560px;
+    margin-top: 14px;
+  }
+  .example-chip {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .example-chip:hover { color: var(--text); border-color: var(--accent); }
+
+  .transcript {
+    width: 100%;
+    max-width: 620px;
+    margin-top: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .turn { display: flex; flex-direction: column; gap: 6px; animation: fadeIn 0.35s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .turn.user { align-items: flex-end; }
+  .bubble {
+    max-width: 85%;
+    padding: 12px 16px;
+    border-radius: 16px;
+    font-size: 14.5px;
+    line-height: 1.5;
+  }
+  .turn.user .bubble { background: var(--accent-2); color: #fff; border-bottom-right-radius: 4px; }
+  .turn.assistant .bubble { background: var(--bg-panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+
+  .card {
+    max-width: 85%;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .card .meta { color: var(--accent); font-weight: 600; margin-bottom: 8px; font-size: 12.5px; }
+  .dish-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .dish-chip {
+    background: rgba(41, 215, 232, 0.12);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  .restaurant { padding: 6px 0; border-top: 1px solid var(--border); }
+  .restaurant:first-child { border-top: none; }
+  .restaurant .name { color: var(--text); font-weight: 500; }
+  .restaurant .sub { font-size: 12px; }
+  .open-badge { color: #4ade80; }
+  .closed-badge { color: #f87171; }
+
+  .error-bubble { border-color: #f87171 !important; color: #f87171; }
+
+  footer {
+    margin-top: 40px;
+    color: var(--text-dim);
+    font-size: 11.5px;
+    text-align: center;
+    opacity: 0.7;
+  }
+</style>
+</head>
+<body data-state="idle">
+
+  <div class="brand"><span class="dot"></span> forecast-fork — <b>simulated Alexa+ experience</b></div>
+
+  <div class="orb-wrap">
+    <div class="ring"></div>
+    <div class="orb"></div>
+  </div>
+  <div class="state-label" id="stateLabel">Ask what to eat, anywhere</div>
+
+  <div class="input-row">
+    <input id="textInput" type="text" placeholder='Try "what should I eat right now in Tokyo?"' />
+    <button class="icon-btn mic-btn" id="micBtn" title="Speak (if your browser supports it)">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14a3 3 0 003-3V6a3 3 0 00-6 0v5a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 006 6.92V21h2v-3.08A7 7 0 0019 11h-2z"/></svg>
+    </button>
+    <button class="icon-btn send-btn" id="sendBtn" title="Ask">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+    </button>
+  </div>
+
+  <div class="examples">
+    <div class="example-chip" data-q="What should I eat right now in Chennai, India?">Chennai, India</div>
+    <div class="example-chip" data-q="I'm vegetarian — what should I eat right now in Tokyo?">Tokyo (vegetarian)</div>
+    <div class="example-chip" data-q="What should I eat right now in Reykjavik, Iceland?">Reykjavik, Iceland</div>
+    <div class="example-chip" data-q="What should I eat right now in Lagos, Nigeria?">Lagos, Nigeria</div>
+  </div>
+
+  <div class="transcript" id="transcript"></div>
+
+  <footer>Real geocoding (Google) · real live weather (Open-Meteo) · real reasoning (Claude on Amazon Bedrock) · real nearby places (Google Places)</footer>
+
+<script>
+  const body = document.body;
+  const stateLabel = document.getElementById('stateLabel');
+  const textInput = document.getElementById('textInput');
+  const micBtn = document.getElementById('micBtn');
+  const sendBtn = document.getElementById('sendBtn');
+  const transcript = document.getElementById('transcript');
+
+  function setState(state, label) {
+    body.setAttribute('data-state', state);
+    if (label !== undefined) stateLabel.textContent = label;
+  }
+
+  function addTurn(role, contentEl) {
+    const turn = document.createElement('div');
+    turn.className = 'turn ' + role;
+    turn.appendChild(contentEl);
+    transcript.appendChild(turn);
+    turn.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    return turn;
+  }
+
+  function bubble(text, extraClass) {
+    const el = document.createElement('div');
+    el.className = 'bubble' + (extraClass ? ' ' + extraClass : '');
+    el.textContent = text;
+    return el;
+  }
+
+  function parseLocationAndContext(query) {
+    // Very light heuristic split: everything after "in <place>" is treated as the location,
+    // the rest (if any) as free-text context. Good enough for a demo UI.
+    const m = query.match(/\bin\s+([^?.!]+)[?.!]?\s*$/i);
+    if (m) {
+      const location = m[1].trim();
+      const context = query.slice(0, m.index).trim().replace(/[-—]\s*$/, '');
+      return { location, context: context || undefined };
+    }
+    return { location: query.trim(), context: undefined };
+  }
+
+  async function ask(query) {
+    if (!query || !query.trim()) return;
+    textInput.value = '';
+    addTurn('user', bubble(query));
+
+    setState('thinking', 'Thinking…');
+    const thinkingBubble = bubble('…');
+    const thinkingTurn = addTurn('assistant', thinkingBubble);
+
+    const { location, context } = parseLocationAndContext(query);
+
+    try {
+      const res = await fetch('/api/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location, context }),
+      });
+      const data = await res.json();
+      thinkingTurn.remove();
+
+      if (!res.ok) {
+        addTurn('assistant', bubble(data.error || 'Something went wrong.', 'error-bubble'));
+        setState('idle', 'Ask what to eat, anywhere');
+        return;
+      }
+
+      setState('speaking', 'Speaking…');
+      addTurn('assistant', bubble(data.reasoning));
+      addTurn('assistant', renderCard(data));
+      speak(data.reasoning, () => setState('idle', 'Ask what to eat, anywhere'));
+    } catch (err) {
+      thinkingTurn.remove();
+      addTurn('assistant', bubble('Could not reach the server. Is `npm run http` running?', 'error-bubble'));
+      setState('idle', 'Ask what to eat, anywhere');
+    }
+  }
+
+  function renderCard(data) {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = data.location + ' · ' + data.weather;
+    card.appendChild(meta);
+
+    const chips = document.createElement('div');
+    chips.className = 'dish-chips';
+    (data.dishes || []).forEach((d) => {
+      const chip = document.createElement('span');
+      chip.className = 'dish-chip';
+      chip.textContent = d;
+      chips.appendChild(chip);
+    });
+    card.appendChild(chips);
+
+    if (data.restaurants && data.restaurants.length) {
+      data.restaurants.slice(0, 3).forEach((r) => {
+        const row = document.createElement('div');
+        row.className = 'restaurant';
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = r.name;
+        const sub = document.createElement('div');
+        sub.className = 'sub';
+        const openBadge = r.openNow === true ? '<span class="open-badge">open now</span>'
+          : r.openNow === false ? '<span class="closed-badge">closed</span>' : '';
+        sub.innerHTML = (r.rating ? r.rating + '★ · ' : '') + r.address + (openBadge ? ' · ' + openBadge : '');
+        row.appendChild(name);
+        row.appendChild(sub);
+        card.appendChild(row);
+      });
+    }
+    return card;
+  }
+
+  function speak(text, onDone) {
+    if (!('speechSynthesis' in window)) { onDone && onDone(); return; }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.rate = 1.02;
+    utter.onend = () => onDone && onDone();
+    utter.onerror = () => onDone && onDone();
+    window.speechSynthesis.speak(utter);
+  }
+
+  sendBtn.addEventListener('click', () => ask(textInput.value));
+  textInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(textInput.value); });
+  document.querySelectorAll('.example-chip').forEach((chip) => {
+    chip.addEventListener('click', () => ask(chip.getAttribute('data-q')));
+  });
+
+  // Optional voice input via the browser's SpeechRecognition API, if available.
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    let listening = false;
+
+    micBtn.addEventListener('click', () => {
+      if (listening) { recognition.stop(); return; }
+      listening = true;
+      micBtn.classList.add('active');
+      setState('listening', 'Listening…');
+      recognition.start();
+    });
+    recognition.onresult = (event) => {
+      const said = event.results[0][0].transcript;
+      textInput.value = said;
+      ask(said);
+    };
+    recognition.onend = () => {
+      listening = false;
+      micBtn.classList.remove('active');
+      if (body.getAttribute('data-state') === 'listening') setState('idle', 'Ask what to eat, anywhere');
+    };
+    recognition.onerror = () => {
+      listening = false;
+      micBtn.classList.remove('active');
+      setState('idle', 'Ask what to eat, anywhere');
+    };
+  } else {
+    micBtn.style.opacity = '0.4';
+    micBtn.title = 'Voice input not supported in this browser — try typing instead';
+  }
+</script>
+</body>
+</html>
