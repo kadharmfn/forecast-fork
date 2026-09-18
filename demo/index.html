@@ -205,6 +205,50 @@
 
   .error-bubble { border-color: #f87171 !important; color: #f87171; }
 
+  .prefs-row.input-row { max-width: 420px; margin-top: 14px; padding: 6px 6px 6px 16px; }
+  .prefs-row input { font-size: 13px; }
+  .prefs-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 560px; margin-top: 10px; }
+  .pref-chip {
+    background: rgba(107, 91, 255, 0.15);
+    color: var(--accent-2);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .refine-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .refine-chip {
+    background: var(--bg);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .refine-chip:hover { color: var(--text); border-color: var(--accent-2); }
+  .refine-input-row { display: flex; gap: 6px; margin-top: 8px; }
+  .refine-input-row input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 12px;
+    color: var(--text);
+    font-size: 12.5px;
+    outline: none;
+  }
+  .refine-input-row button {
+    background: var(--accent-2);
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
   footer {
     margin-top: 40px;
     color: var(--text-dim);
@@ -241,9 +285,17 @@
     <div class="example-chip" data-q="What should I eat right now in Lagos, Nigeria?">Lagos, Nigeria</div>
   </div>
 
+  <div class="input-row prefs-row">
+    <input id="prefInput" type="text" placeholder="Remember a preference, e.g. vegetarian" />
+    <button class="icon-btn send-btn" id="prefBtn" title="Remember for this session">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4v16m8-8H4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div class="prefs-chips" id="prefsChips"></div>
+
   <div class="transcript" id="transcript"></div>
 
-  <footer>Real geocoding (Google) · real live weather (Open-Meteo) · real reasoning (Claude on Amazon Bedrock) · real nearby places (Google Places)</footer>
+  <footer>Real geocoding (Google) · real live weather (Open-Meteo) · real reasoning (Claude on Amazon Bedrock) · real nearby places (Google Places)<br/>Session-aware: preferences and follow-up feedback carry across turns without repeating yourself.</footer>
 
 <script>
   const body = document.body;
@@ -252,6 +304,15 @@
   const micBtn = document.getElementById('micBtn');
   const sendBtn = document.getElementById('sendBtn');
   const transcript = document.getElementById('transcript');
+  const prefInput = document.getElementById('prefInput');
+  const prefBtn = document.getElementById('prefBtn');
+  const prefsChips = document.getElementById('prefsChips');
+
+  // One session per page load — mirrors a continuous conversation with this device. Carries
+  // remembered preferences and the last recommendation across turns (get_dining_recommendation →
+  // refine_recommendation), without the customer repeating themselves.
+  const sessionId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  let hasActiveRecommendation = false;
 
   function setState(state, label) {
     body.setAttribute('data-state', state);
@@ -301,7 +362,42 @@
       const res = await fetch('/api/recommend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ location, context }),
+        body: JSON.stringify({ location, context, session_id: sessionId }),
+      });
+      const data = await res.json();
+      thinkingTurn.remove();
+
+      if (!res.ok) {
+        addTurn('assistant', bubble(data.error || 'Something went wrong.', 'error-bubble'));
+        setState('idle', 'Ask what to eat, anywhere');
+        return;
+      }
+
+      hasActiveRecommendation = true;
+      setState('speaking', 'Speaking…');
+      addTurn('assistant', bubble(data.reasoning));
+      addTurn('assistant', renderCard(data));
+      speak(data.reasoning, () => setState('idle', 'Ask what to eat, anywhere'));
+    } catch (err) {
+      thinkingTurn.remove();
+      addTurn('assistant', bubble('Could not reach the server. Is `npm run http` running?', 'error-bubble'));
+      setState('idle', 'Ask what to eat, anywhere');
+    }
+  }
+
+  async function refine(feedback) {
+    if (!feedback || !feedback.trim() || !hasActiveRecommendation) return;
+    addTurn('user', bubble(feedback));
+
+    setState('thinking', 'Thinking…');
+    const thinkingBubble = bubble('…');
+    const thinkingTurn = addTurn('assistant', thinkingBubble);
+
+    try {
+      const res = await fetch('/api/refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, feedback }),
       });
       const data = await res.json();
       thinkingTurn.remove();
@@ -359,8 +455,69 @@
         card.appendChild(row);
       });
     }
+
+    card.appendChild(renderRefineRow());
     return card;
   }
+
+  function renderRefineRow() {
+    const wrap = document.createElement('div');
+
+    const chips = document.createElement('div');
+    chips.className = 'refine-row';
+    ['Something cheaper', 'Not that — try again', 'Something lighter'].forEach((label) => {
+      const chip = document.createElement('span');
+      chip.className = 'refine-chip';
+      chip.textContent = label;
+      chip.addEventListener('click', () => refine(label));
+      chips.appendChild(chip);
+    });
+    wrap.appendChild(chips);
+
+    const inputRow = document.createElement('div');
+    inputRow.className = 'refine-input-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Or say what you think, e.g. "too spicy"';
+    const btn = document.createElement('button');
+    btn.textContent = 'Refine';
+    const submit = () => { const v = input.value; input.value = ''; refine(v); };
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    inputRow.appendChild(input);
+    inputRow.appendChild(btn);
+    wrap.appendChild(inputRow);
+
+    return wrap;
+  }
+
+  function renderPrefsChips(preferences) {
+    prefsChips.innerHTML = '';
+    (preferences || []).forEach((p) => {
+      const chip = document.createElement('span');
+      chip.className = 'pref-chip';
+      chip.textContent = p;
+      prefsChips.appendChild(chip);
+    });
+  }
+
+  async function rememberPreference(preference) {
+    if (!preference || !preference.trim()) return;
+    try {
+      const res = await fetch('/api/remember', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, preference }),
+      });
+      const data = await res.json();
+      if (res.ok) renderPrefsChips(data.preferences);
+    } catch (err) {
+      // Best-effort — preferences are a demo nicety, not core to the ask/refine flow.
+    }
+  }
+
+  prefBtn.addEventListener('click', () => { const v = prefInput.value; prefInput.value = ''; rememberPreference(v); });
+  prefInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const v = prefInput.value; prefInput.value = ''; rememberPreference(v); } });
 
   function speak(text, onDone) {
     if (!('speechSynthesis' in window)) { onDone && onDone(); return; }

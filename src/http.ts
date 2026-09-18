@@ -5,6 +5,8 @@ import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer } from "./server.js";
 import { getDiningRecommendation } from "./tools/getDiningRecommendation.js";
+import { refineRecommendation } from "./tools/refineRecommendation.js";
+import { rememberPreference } from "./tools/rememberPreference.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,7 +19,11 @@ app.use("/demo", express.static(path.join(__dirname, "..", "demo")));
 
 app.post("/api/recommend", async (req, res) => {
   try {
-    const { location, context } = req.body as { location?: string; context?: string };
+    const { location, context, session_id } = req.body as {
+      location?: string;
+      context?: string;
+      session_id?: string;
+    };
     if (!location) {
       res.status(400).json({ error: "location is required" });
       return;
@@ -26,11 +32,40 @@ app.post("/api/recommend", async (req, res) => {
       location,
       context,
       includeRestaurants: true,
+      sessionId: session_id,
     });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
+});
+
+app.post("/api/refine", async (req, res) => {
+  try {
+    const { session_id, feedback } = req.body as { session_id?: string; feedback?: string };
+    if (!session_id || !feedback) {
+      res.status(400).json({ error: "session_id and feedback are required" });
+      return;
+    }
+    const result = await refineRecommendation({
+      sessionId: session_id,
+      feedback,
+      includeRestaurants: true,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/remember", (req, res) => {
+  const { session_id, preference } = req.body as { session_id?: string; preference?: string };
+  if (!session_id || !preference) {
+    res.status(400).json({ error: "session_id and preference are required" });
+    return;
+  }
+  const result = rememberPreference({ sessionId: session_id, preference });
+  res.json(result);
 });
 
 // Stateless mode: each request gets its own server + transport pair. Our tools don't need

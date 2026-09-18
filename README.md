@@ -3,9 +3,11 @@
 An MCP server that recommends what to eat right now, based on live location + weather,
 reasoned over with an LLM's cultural/culinary knowledge — not a cuisine keyword filter.
 
-Built for the **Alexa+ track**: Alexa+ acts as the MCP client, discovers `get_dining_recommendation`
-and `search_restaurants`, and calls them when a customer asks something like "what should I eat
-tonight?"
+Built for the **Alexa+ track**: Alexa+ acts as the MCP client, discovers `get_dining_recommendation`,
+`refine_recommendation`, `remember_preference`, and `search_restaurants`, and calls them as a
+customer asks "what should I eat tonight?", reacts to the suggestion ("something cheaper"), or
+states a standing preference ("I'm vegetarian") — an agentic workflow that keeps context across
+turns, not a single-shot Q&A.
 
 Inspired by an arxiv paper on agentic dining recommendation (location tool + weather tool + LLM
 reasoning) and extends [this blog post's](https://kadhar.dev/blog/agentic-restaurant-discovery)
@@ -19,13 +21,23 @@ comforting given the weather — not just filter by cuisine, price, or hours.
 Alexa+ (MCP client)
   │  "what should I eat tonight?"
   ▼
-get_dining_recommendation(location, context?, include_restaurants?)
+get_dining_recommendation(location, context?, include_restaurants?, session_id?)
   │
   ├─▶ geocodeLocation()      Google Geocoding API   → lat/lng, city/region/country
   ├─▶ getCurrentWeather()    Open-Meteo (no key)     → temp, precipitation, conditions + near-term trend
+  ├─▶ [session_id] apply remembered preferences, cache location/weather/dishes for later refinement
   ├─▶ reasonAboutDining()    Amazon Bedrock (Claude) → structured recommendation (forced tool-use):
   │                             { dishes[], primary_keyword, reasoning }
   └─▶ (if include_restaurants) searchNearbyRestaurants()  Google Places API, keyword = primary_keyword
+
+refine_recommendation(session_id, feedback, include_restaurants?)
+  │  "actually, something cheaper" — a follow-up in the SAME conversation, no location re-entry
+  ├─▶ reuses the session's cached location + weather (no re-geocoding)
+  ├─▶ reasonAboutDining()    same reasoning step, told what was rejected and why
+  └─▶ (if include_restaurants) searchNearbyRestaurants()
+
+remember_preference(session_id, preference)
+  │  "I'm vegetarian" — stored once, applied automatically by every later call in that session
 
 search_restaurants(location, keyword?)
   │
@@ -38,6 +50,15 @@ one customer question triggers geocode → weather → LLM reasoning → restaur
 orchestrated call, using Bedrock's forced tool-use to get the dish name back as structured data
 (not parsed from prose) so it can feed directly into the Places query. `search_restaurants` also
 stays exposed standalone, so Alexa+ can call it independently too.
+
+**Session memory** (`src/lib/session.ts`) is what turns this from a single-turn Q&A bot into a
+multi-turn agentic workflow: pass any stable `session_id` (a per-conversation or per-customer id
+that Alexa+ would supply) to `get_dining_recommendation`, and it's kept alive for `remember_preference`
+and `refine_recommendation` to build on — standing dietary preferences persist across turns without
+being restated, and "not that, something cheaper" reuses the cached location/weather instead of
+re-geocoding, while avoiding previously-rejected dishes. It's an in-memory, per-process `Map` —
+deliberately simple for a hackathon build; a real deployment would back it with a shared store
+(Redis/DynamoDB) so it survives restarts and works across multiple server instances.
 
 **Weather-aware vs. weather-blind comparison** (`npm run demo:weather-impact`) — runs the same
 location through the reasoning step with and without weather context, to make visible what the
@@ -69,6 +90,7 @@ npm run smoke:weather -- "Chennai, India"        # geocode + weather only, no Be
 npm run smoke:restaurants -- "Chennai, India"    # + Google Places search, no Bedrock needed
 npm run smoke -- "Chennai, India"                # full pipeline incl. restaurant chaining, needs Bedrock
 npm run demo:weather-impact -- "Chennai, India"  # weather-aware vs. weather-blind side-by-side, needs Bedrock
+npm run smoke:session -- "Chennai, India"        # remember_preference → get → refine, needs Bedrock
 ```
 
 ### Real measured performance (`npm run load-test`, real numbers from one run)
@@ -111,10 +133,12 @@ npm run http   # Streamable HTTP transport at http://localhost:8787/mcp — leav
 npm run inspect
 ```
 
-Opens a browser UI at a printed localhost URL. Shows both tools with their real JSON schemas.
-Pick `get_dining_recommendation`, fill in `location` (e.g. `Chennai, India`), click **Run Tool**,
-watch the live structured result come back. Confirms the actual MCP wire protocol — tool
-discovery, schema validation, invocation, response — works, independent of any client.
+Opens a browser UI at a printed localhost URL. Shows all four tools with their real JSON schemas.
+Pick `get_dining_recommendation`, fill in `location` (e.g. `Chennai, India`) and a `session_id`
+(any string), click **Run Tool**, then call `refine_recommendation` with the same `session_id`
+and some `feedback` — watch the second result reuse the cached location/weather and avoid the
+first suggestion. Confirms the actual MCP wire protocol — tool discovery, schema validation,
+invocation, response, and cross-call session state — works, independent of any client.
 
 ### 2. Web UI — simulated Alexa+ device experience
 
@@ -124,11 +148,15 @@ input + spoken responses).
 A dark, Echo-style interface: a glowing orb that shifts through idle → listening → thinking →
 speaking states, a text input (or literally speak into the mic, if your browser supports
 `SpeechRecognition`), example question chips, and a chat transcript. Responses are spoken aloud
-via the browser's `SpeechSynthesis` API when available.
+via the browser's `SpeechSynthesis` API when available. A `session_id` is generated once per page
+load; a "remember a preference" field feeds `remember_preference`, and every recommendation card
+carries quick-feedback chips ("Something cheaper", "Not that — try again") plus a free-text field
+that call `refine_recommendation` — the multi-turn, context-carrying flow, live in the browser.
 
-This calls `POST /api/recommend` (see `src/http.ts`), which invokes the exact same
-`getDiningRecommendation()` function the MCP tool calls — real geocoding, real weather, real
-Bedrock reasoning, real Places search. It's not going through the MCP JSON-RPC envelope itself
+This calls `POST /api/recommend`, `/api/refine`, and `/api/remember` (see `src/http.ts`), which
+invoke the exact same `getDiningRecommendation()` / `refineRecommendation()` / `rememberPreference()`
+functions the MCP tools call — real geocoding, real weather, real Bedrock reasoning, real Places
+search. It's not going through the MCP JSON-RPC envelope itself
 (that's what Inspector and the bridge prove) — this layer exists purely to make the demo visually
 read as an assistant experience rather than a dev tool or terminal.
 
@@ -214,6 +242,9 @@ Researched directly against Amazon's developer docs, not guessed:
 - **Alexa+ OAuth / PRM auth layer** — left out to keep this buildable fast during the hackathon.
 - **Elicitation** for missing required arguments — `location` is required on both tools with no
   fallback prompt if it's missing from context; fine for a demo where location is always supplied.
+- **Durable session storage** — `remember_preference`/`refine_recommendation` state lives in an
+  in-memory `Map` per server process (see `src/lib/session.ts`); fine for a single-process demo,
+  but a real deployment needs a shared store so it survives restarts and multiple instances.
 - **Bedrock model ID** — defaults to `anthropic.claude-sonnet-4-6-v1:0` in `.env.example`; swap for
   whatever model/inference-profile you have enabled in your AWS account/region.
 
@@ -223,17 +254,22 @@ Researched directly against Amazon's developer docs, not guessed:
 src/
   server.ts                         shared McpServer instance + tool registrations
   index.ts                          stdio entry point (Claude Desktop, MCP Inspector)
-  http.ts                           Streamable HTTP entry point + /demo static UI + /api/recommend
-  tools/getDiningRecommendation.ts  orchestrates geocode → weather → reasoning
+  http.ts                           Streamable HTTP entry point + /demo static UI + /api/* routes
+  tools/getDiningRecommendation.ts  orchestrates geocode → weather → reasoning (+ session memory)
+  tools/refineRecommendation.ts     follow-up turn: reuses cached location/weather, avoids repeats
+  tools/rememberPreference.ts       stores a standing preference on a session
   tools/searchRestaurants.ts        orchestrates geocode → nearby restaurant search
   lib/geocode.ts                    Google Geocoding API client
   lib/weather.ts                    Open-Meteo client + WMO weather code descriptions
   lib/bedrock.ts                    Bedrock Claude call + reasoning prompt (structured tool-use)
   lib/places.ts                     Google Places nearby search client
+  lib/session.ts                    in-memory per-session preferences + last-recommendation cache
 demo/
-  index.html                        simulated Alexa+ device UI (orb, voice in/out, chat transcript)
+  index.html                        simulated Alexa+ device UI (orb, voice in/out, chat transcript,
+                                     preference chips, inline refine-this-suggestion controls)
 scripts/
   smoke-test.ts                     full pipeline test, incl. restaurant chaining (needs Bedrock)
+  smoke-test-session.ts             remember_preference → get → refine, needs Bedrock
   smoke-test-weather.ts             geocode + weather only
   smoke-test-restaurants.ts         geocode + restaurant search only
   demo-weather-impact.ts            weather-aware vs. weather-blind side-by-side (needs Bedrock)

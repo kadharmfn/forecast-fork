@@ -14,6 +14,7 @@
     "smoke": "tsx scripts/smoke-test.ts",
     "smoke:weather": "tsx scripts/smoke-test-weather.ts",
     "smoke:restaurants": "tsx scripts/smoke-test-restaurants.ts",
+    "smoke:session": "tsx scripts/smoke-test-session.ts",
     "demo:weather-impact": "tsx scripts/demo-weather-impact.ts",
     "inspect": "npx @modelcontextprotocol/inspector tsx src/index.ts",
     "http": "tsx watch src/http.ts",
