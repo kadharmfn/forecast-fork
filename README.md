@@ -17,32 +17,34 @@ comforting given the weather — not just filter by cuisine, price, or hours.
 
 ## Architecture
 
-```
-Alexa+ (MCP client)
-  │  "what should I eat tonight?"
-  ▼
-get_dining_recommendation(location, context?, include_restaurants?, session_id?)
-  │
-  ├─▶ geocodeLocation()      Google Geocoding API   → lat/lng, city/region/country
-  ├─▶ getCurrentWeather()    Open-Meteo (no key)     → temp, precipitation, conditions + near-term trend
-  ├─▶ [session_id] apply remembered preferences, cache location/weather/dishes for later refinement
-  ├─▶ reasonAboutDining()    Amazon Bedrock (Claude) → structured recommendation (forced tool-use):
-  │                             { dishes[], primary_keyword, reasoning }
-  └─▶ (if include_restaurants) searchNearbyRestaurants()  Google Places API, keyword = primary_keyword
+```mermaid
+flowchart TD
+    Q["Alexa+ customer asks:<br/>What should I eat tonight?"] --> T1
+    Q --> T2
+    Q --> T3
+    Q --> T4
 
-refine_recommendation(session_id, feedback, include_restaurants?)
-  │  "actually, something cheaper" — a follow-up in the SAME conversation, no location re-entry
-  ├─▶ reuses the session's cached location + weather (no re-geocoding)
-  ├─▶ reasonAboutDining()    same reasoning step, told what was rejected and why
-  └─▶ (if include_restaurants) searchNearbyRestaurants()
+    subgraph Tools["forecast-fork MCP tools"]
+        T1["get_dining_recommendation"]
+        T2["refine_recommendation"]
+        T3["remember_preference"]
+        T4["search_restaurants"]
+    end
 
-remember_preference(session_id, preference)
-  │  "I'm vegetarian" — stored once, applied automatically by every later call in that session
+    T1 --> Geo["Google Geocoding<br/>lat/lng, region"]
+    Geo --> Wx["Open-Meteo<br/>live weather + trend"]
+    Wx --> LLM["Claude on Amazon Bedrock<br/>forced tool-use reasoning"]
+    LLM -. include_restaurants: true .-> Places["Google Places<br/>real nearby restaurants"]
 
-search_restaurants(location, keyword?)
-  │
-  ├─▶ geocodeLocation()          Google Geocoding API → lat/lng
-  └─▶ searchNearbyRestaurants()  Google Places API     → real nearby places matching the keyword
+    T4 --> Geo
+    T4 --> Places
+
+    T2 -->|reuses cached location + weather| LLM
+
+    Session[("Session store<br/>preferences, last location/weather/dishes")]
+    T1 -.->|apply + cache| Session
+    T2 -.->|read + update| Session
+    T3 -->|store| Session
 ```
 
 `get_dining_recommendation` auto-chains into restaurant search when `include_restaurants: true` —
