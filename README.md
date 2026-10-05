@@ -15,6 +15,11 @@ location + restaurant-search pipeline with the piece the paper actually contribu
 a first-class input to the reasoning step**, prompting the model to reason about what's culturally
 comforting given the weather — not just filter by cuisine, price, or hours.
 
+## Demo
+
+https://youtu.be/iFRsbkJIBl8
+
+
 ## Architecture
 
 ```mermaid
